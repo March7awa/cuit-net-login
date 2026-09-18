@@ -122,10 +122,25 @@ class Config:
 
     # -- persistence -------------------------------------------------------
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(self.raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+            tmp.write_text(json.dumps(self.raw, ensure_ascii=False, indent=2),
+                           encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            # 别人的电脑上最容易踩的就是这个：程序放在 Program Files、
+            # 整个文件夹只读、或者安全软件把文件锁了。
+            raise RuntimeError(
+                f"写不进配置文件：\n  {self.path}\n"
+                f"（{type(exc).__name__}: {exc}）\n\n"
+                "常见原因：\n"
+                "  · 程序所在的文件夹是只读的（比如解压在 C:\\Program Files 里）\n"
+                "  · 文件夹里有个旧 config.json，但当前账号改不了它\n"
+                "  · 安全软件 / 杀毒把文件锁住了\n\n"
+                "解决办法：把整个文件夹挪到桌面或 D 盘再试；"
+                "或者删掉上面那个 config.json，让程序写到默认位置（%APPDATA%）。"
+            ) from exc
         secret.harden_permissions(str(self.path))
 
     def set_password(self, plain: str) -> None:

@@ -13,6 +13,7 @@ import ctypes.wintypes as wintypes
 import getpass
 import os
 import stat
+import subprocess
 from typing import Any
 
 __all__ = ["protect", "unprotect", "is_encrypted"]
@@ -92,10 +93,24 @@ def harden_permissions(path: str) -> None:
             grants = [f'"{user}":F']
             # 本机系统和管理员永远保留访问权，避免任何情况下的自锁
             grants += ["*S-1-5-18:F", "*S-1-5-32-544:F"]
-            os.system(
-                f'icacls "{path}" /grant:r {" ".join(grants)} >nul 2>&1')
+            _run_hidden(f'icacls "{path}" /grant:r {" ".join(grants)}')
         else:
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except Exception:
+        pass
+
+
+def _run_hidden(command: str) -> None:
+    """跑一条 cmd 命令，且**不弹黑窗口**。
+
+    不能用 ``os.system``：pythonw 没有控制台，Windows 会为子进程新建一个，
+    于是每次保存配置都会闪一下黑框 —— 开机自启的程序闪黑框很吓人。
+    """
+    flags = 0x08000000 if _IS_WINDOWS else 0  # CREATE_NO_WINDOW
+    try:
+        subprocess.run(command, shell=True, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=15, creationflags=flags)
     except Exception:
         pass
 

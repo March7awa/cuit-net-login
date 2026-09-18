@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 from . import __version__, config as config_mod
 from .httpx import HttpClient
@@ -147,6 +147,16 @@ def _run_ps(script: Path, *extra: str, timeout: float = 90) -> tuple[bool, str]:
         return False, f"调用 PowerShell 失败: {exc}"
     out = (proc.stdout or "") + (proc.stderr or "")
     return proc.returncode == 0, out.strip()
+
+
+def _open_in_editor(path: Path) -> None:
+    """用系统默认程序打开一个文件（Windows 上是记事本/关联程序）。"""
+    if os.name == "nt":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 
 def autostart_installed() -> bool:
@@ -732,8 +742,15 @@ class MainPanel(ttk.Frame):
         btns.pack(fill="x", pady=12)
         ttk.Button(btns, text="立即登录", command=self.login_now).pack(side="left")
         ttk.Button(btns, text="刷新状态", command=self.refresh).pack(side="left", padx=6)
-        ttk.Button(btns, text="重新配置", command=self.app.show_wizard).pack(side="left", padx=6)
-        ttk.Button(btns, text="打开日志", command=self.open_log).pack(side="left", padx=6)
+        ttk.Button(btns, text="修改密码", command=self.change_password).pack(side="left", padx=6)
+        ttk.Button(btns, text="打开配置文件", command=self.open_config).pack(side="left", padx=6)
+
+        btns2 = ttk.Frame(self)
+        btns2.pack(fill="x", pady=(0, 12))
+        ttk.Button(btns2, text="重新配置", command=self.app.show_wizard).pack(side="left")
+        ttk.Button(btns2, text="打开日志", command=self.open_log).pack(side="left", padx=6)
+        ttk.Label(btns2, text="密码随时可以改，不用重跑向导", foreground="#888",
+                  font=UI_FONT_SMALL).pack(side="left", padx=6)
 
         start = ttk.LabelFrame(self, text=" 开机自启 ", padding=12)
         start.pack(fill="x")
@@ -789,7 +806,8 @@ class MainPanel(ttk.Frame):
                 desc = result["provider"]
             self.detail_var.set(
                 f"账号：{result['username'] or '(未设置)'}      认证方式：{desc}\n"
-                f"IP：{result['ip'] or '未知'}      MAC：{result['mac'] or '未知'}"
+                f"IP：{result['ip'] or '未知'}      MAC：{result['mac'] or '未知'}\n"
+                f"配置文件：{self.app.cfg_path}"
             )
             installed = result["start"]
             self.start_var.set("已开启：开机会自动登录，断线会自动重连"
@@ -828,7 +846,15 @@ class MainPanel(ttk.Frame):
             client = HttpClient()
             provider = get_provider(cfg.provider)(cfg, client, log)
             if not cfg.has_password():
-                return {"ok": False, "message": "还没设置密码，请点「重新配置」"}
+                return {"ok": False, "need_password": True,
+                        "message": "还没设置密码，点「修改密码」填一个就行。"}
+            try:
+                cfg.password()  # 顺便确认密文能解开（换了电脑/换了用户就会失败）
+            except Exception:  # noqa: BLE001
+                return {"ok": False, "need_password": True,
+                        "message": "已保存的密码在这台电脑上解不开（配置是从别的电脑"
+                                   "拷过来的，或者换过 Windows 账号）。\n"
+                                   "点「修改密码」重新输一次就好了。"}
             result = provider.login()
             _trace(f"main: login 返回 ok={result.ok} msg={result.message}")
             return {"ok": result.ok, "message": result.message}
@@ -843,7 +869,13 @@ class MainPanel(ttk.Frame):
                 messagebox.showinfo("登录成功", result["message"])
             else:
                 self._log(f"失败：{result['message']}")
-                messagebox.showerror("登录失败", result["message"])
+                if result.get("need_password"):
+                    # 密码没设 / 解不开，别把用户丢在死路上，直接问他要不要现在改
+                    if messagebox.askyesno("需要密码", result["message"] + "\n\n现在设置吗？"):
+                        self.change_password()
+                        return
+                else:
+                    messagebox.showerror("登录失败", result["message"])
             self.refresh()
 
         self.bg.run(work, done)
@@ -874,10 +906,54 @@ class MainPanel(ttk.Frame):
         if not path.exists():
             messagebox.showinfo("日志", f"还没有日志文件：\n{path}\n\n先点一次「立即登录」就会生成。")
             return
-        if os.name == "nt":
-            os.startfile(str(path))  # type: ignore[attr-defined]
+        _open_in_editor(path)
+
+    def open_config(self) -> None:
+        """直接打开 config.json，让用户想改什么就改什么。
+
+        密码在 Windows 上是 DPAPI 密文，手改不了 —— 那就用「修改密码」。
+        其它字段（账号、运营商、间隔……）手改都有效。
+        """
+        path = self.app.cfg_path
+        try:
+            if not path.exists():
+                # 没有就现造一个，别让用户对着「文件不存在」发呆
+                cfg = config_mod.load(path, must_exist=False)
+                cfg.save()
+            _open_in_editor(path)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(
+                "打不开配置文件",
+                f"{path}\n\n{exc}\n\n你可以用记事本手动打开这个路径。")
+
+    def change_password(self) -> None:
+        """单独改密码 —— 不该为了改个密码重跑五步向导。"""
+        _trace("main: 点击修改密码")
+        first = simpledialog.askstring("修改密码", "新的校园网密码：",
+                                       show="●", parent=self)
+        if not first:
+            return
+        second = simpledialog.askstring("修改密码", "再输一次确认：",
+                                        show="●", parent=self)
+        if second is None:
+            return
+        if first != second:
+            messagebox.showwarning("修改密码", "两次输入不一致，没改动。")
+            return
+
+        try:
+            cfg = config_mod.load(self.app.cfg_path, must_exist=False)
+            cfg.set_password(first)
+            cfg.save()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("修改密码失败", str(exc))
+            return
+
+        self._log("— 密码已更新 —")
+        if messagebox.askyesno("修改密码", "密码已保存。现在就登录一次试试吗？"):
+            self.login_now()
         else:
-            webbrowser.open(path.as_uri())
+            self.refresh()
 
 
 # ==========================================================================

@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import ctypes
 import ctypes.wintypes as wintypes
+import getpass
 import os
 import stat
 from typing import Any
@@ -75,11 +76,37 @@ def is_encrypted(blob: Any) -> bool:
 
 
 def harden_permissions(path: str) -> None:
-    """Best-effort tightening of a secret-bearing file."""
+    """Best-effort tightening of a secret-bearing file.
+
+    Windows: *add* an explicit full-control ACE for the current user instead of
+    replacing the ACL.  ``/inheritance:r`` + a single grant used to look tidier,
+    but ``%USERNAME%`` does not always match the real account (domain accounts,
+    Microsoft accounts, elevated vs. normal token), and when it misses, the
+    owner ends up with a file they can neither read nor edit -- they simply
+    cannot change their own password any more.  The password is DPAPI-sealed
+    anyway, so an inherited ACE for ``Users`` leaks nothing.
+    """
     try:
         if _IS_WINDOWS:
-            os.system(f'icacls "{path}" /inheritance:r /grant:r "%USERNAME%":F >nul 2>&1')
+            user = os.environ.get("USERNAME") or _current_user()
+            grants = [f'"{user}":F']
+            # 本机系统和管理员永远保留访问权，避免任何情况下的自锁
+            grants += ["*S-1-5-18:F", "*S-1-5-32-544:F"]
+            os.system(
+                f'icacls "{path}" /grant:r {" ".join(grants)} >nul 2>&1')
         else:
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
     except Exception:
         pass
+
+
+def _current_user() -> str:
+    """当前用户名，拿不到就返回一个 icacls 认得的东西。"""
+    for getter in (getpass.getuser, lambda: os.environ.get("USER", "")):
+        try:
+            name = getter()
+        except Exception:  # noqa: BLE001
+            continue
+        if name:
+            return name
+    return "Users"

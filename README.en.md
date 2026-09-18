@@ -138,7 +138,7 @@ See [`config.example.json`](config.example.json) for a complete example.
 | Field | Meaning |
 |---|---|
 | `provider` | Which adapter to use |
-| `username` / `password` | Account; the password is written by `set-password` (stored as DPAPI ciphertext on Windows) |
+| `username` / `password` | Account; the password is written by `set-password` or the "Change password" button (stored as DPAPI ciphertext on Windows — a hand-written plaintext value works too and is re-encrypted on the next save) |
 | `options.portal` | Authentication server address. **May be left empty** — it is auto-discovered from the portal redirect while you are offline |
 | `options.nasip` | NAS/AC (access device) address. **May be left empty** — also auto-discovered, then written back to the config |
 | `options.mac` | `auto` takes the MAC of the default NIC; if it picks the wrong one, set 12 hex digits by hand |
@@ -233,6 +233,17 @@ addresses and never writes anything into your real config. No external network i
 ---
 
 ## FAQ
+
+**Q: I changed my password / typed it wrong. How do I set it again?**
+Click **Change password** on the main panel and type it twice — no need to redo the wizard.
+On the command line use `python campus_login.py set-password`.
+You can also click **Open config file** and put a plaintext password in `"password": "..."`;
+the program accepts it and re-encrypts it the next time it saves.
+
+**Q: I copied the config to another PC and it says the password can't be decrypted.**
+That is expected. On Windows the password is DPAPI-sealed, so the ciphertext can only be decrypted by
+**the same user on the same machine** — that is exactly what makes it safer than plaintext.
+On the new machine just click **Change password** once.
 
 **Q: It says "cannot get MAC", or the MAC is wrong. What now?**
 `python campus_login.py status` prints the MAC it picked up. If it is wrong (a VMware virtual adapter, for example),

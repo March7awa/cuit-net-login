@@ -355,13 +355,12 @@ class Wizard(ttk.Frame):
             f"已套用「{item['label']}」预设：服务器 {portal or '(待填)'}")
 
     def _page_server(self) -> None:
-        ttk.Label(self.body, text="认证服务器",
+        ttk.Label(self.body, text="认证服务器（这一页可以整页跳过）",
                   font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
-        ttk.Label(self.body, text="这一页可以整页跳过，直接点「下一步」。",
-                  foreground="#0a7", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w")
-        ttk.Label(self.body, foreground="#666", wraplength=580, justify="left",
-                  text="断开校园网时程序会自己去碰一下网络，从门户的跳转里把服务器地址"
-                       "和接入设备地址探测出来，不需要你知道这些。").pack(anchor="w", pady=(4, 10))
+        ttk.Label(self.body, foreground="#666", wraplength=600, justify="left",
+                  text="断网时程序会自己去碰一下网络，从门户的跳转里把两个地址读出来，"
+                       "不需要你知道。\n想手填就填认证页地址栏里那个 IP。").pack(
+            anchor="w", pady=(4, 10))
 
         pick = ttk.Frame(self.body)
         pick.pack(fill="x", pady=(0, 10))
@@ -374,10 +373,8 @@ class Wizard(ttk.Frame):
         row.pack(fill="x")
         ttk.Label(row, text="服务器", width=10).pack(side="left")
         ttk.Entry(row, textvariable=self.portal, width=46).pack(side="left", fill="x", expand=True)
-        ttk.Label(self.body, foreground="#888", font=UI_FONT_SMALL,
-                  text="　　　留空即可（自动探测）。手填就填认证页那个 IP。").pack(anchor="w", pady=(2, 0))
 
-        # 只有需要选运营商的认证方式（目前是锐捷 SAM）才显示这一行
+        # 只有需要选运营商的认证方式（目前是锐捷 SAM）才显示这些
         try:
             supports_service = "service" in get_provider(self.provider_name.get()).example_options
         except Exception:  # noqa: BLE001
@@ -388,12 +385,6 @@ class Wizard(ttk.Frame):
             ttk.Label(row1, text="接入设备", width=10).pack(side="left")
             ttk.Entry(row1, textvariable=self.nasip, width=44).pack(
                 side="left", fill="x", expand=True)
-            ttk.Label(self.body, foreground="#888", font=UI_FONT_SMALL, wraplength=580,
-                      justify="left",
-                      text="　　　同样留空即可。这个是接入设备（AC）的地址，"
-                           "不填的话门户会当成 1.1.1.1，导致拿不到运营商列表、\n"
-                           "　　　认证也不会真正放行 —— 所以程序会自动探测、学到并记住它。").pack(
-                anchor="w", pady=(2, 0))
 
             row2 = ttk.Frame(self.body)
             row2.pack(fill="x", pady=(8, 0))
@@ -401,22 +392,18 @@ class Wizard(ttk.Frame):
             ttk.Combobox(row2, textvariable=self.service, width=44,
                          values=[SERVICE_AUTO] + service_choices()).pack(
                 side="left", fill="x", expand=True)
-            ttk.Label(self.body, foreground="#888", font=UI_FONT_SMALL, wraplength=580,
+
+            ttk.Label(self.body, foreground="#888", font=UI_FONT_SMALL, wraplength=600,
                       justify="left",
-                      text="很多学校 CAS 认证完还要再选一次运营商才会真正通网，"
-                           "不选就一直上不了网。\n"
-                           "按你办宽带时选的那家填；不确定就先用「自动」，"
-                           "登录日志里会打印门户实际给了哪些选项。").pack(anchor="w", pady=(4, 0))
+                      text="上面三个都可以留空。运营商按你办宽带时选的那家填"
+                           "（移动 / 电信 / 联通），不确定就用「自动」。").pack(
+                anchor="w", pady=(4, 0))
 
         info = ttk.LabelFrame(self.body, text=" 本机信息 ", padding=10)
-        info.pack(fill="x", pady=14)
+        info.pack(fill="x", pady=12)
         ttk.Label(info, text=f"IP 地址：{default_local_ip() or '取不到'}").pack(anchor="w")
         mac = primary_mac()
         ttk.Label(info, text=f"MAC 地址：{mac or '取不到'}（自动识别，一般不用改）").pack(anchor="w", pady=(4, 0))
-
-        ttk.Label(self.body, foreground="#666", wraplength=560, justify="left",
-                  text="如果你的学校不在默认列表里，可以先用上面选好的通用方式，"
-                       "配好后再按 README 里的说明补参数。").pack(anchor="w")
 
     def _detect_server(self) -> None:
         """断开校园网时，从门户的跳转里把服务器地址和接入设备地址探测出来。
@@ -963,9 +950,10 @@ class App:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("校园网自动登录")
-        self.root.geometry("640x560")
-        self.root.minsize(600, 520)
-        self._center(640, 560)
+        # 向导第 1 页需要 563px 高才不会被挤掉最下面一行，所以留到 590
+        self.root.geometry("640x590")
+        self.root.minsize(620, 560)
+        self._center(640, 590)
 
         # 界面上任何没被处理的异常都要留下痕迹并告诉用户，
         # 否则 pythonw 没有控制台，出错就是「点了没反应」。

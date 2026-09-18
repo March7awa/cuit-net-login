@@ -309,40 +309,6 @@ Windows：`... install-windows.ps1 -Uninstall`；或者任务管理器结束 `py
 
 ---
 
-## 发布到 GitHub 之前：先跑一遍清理
-
-这个项目是"配好自己用"的，用一阵子之后你的学号、MAC、内网地址会散落在
-配置、日志和文档示例里。**直接推上去会连这些一起公开。**
-
-仓库自带一个清理脚本：
-
-```bash
-python tools/clean-for-sharing.py              # 只预览，不会改任何东西
-python tools/clean-for-sharing.py --apply      # 执行清理
-```
-
-它会处理四件事：
-
-| | 内容 | 为什么必须处理 |
-|---|---|---|
-| A | 已入库文件里的学号 / MAC / IP / NAS 地址 / CAS 票据 | 这些会**随代码一起公开** |
-| B | `_recon/`、所有 `__pycache__/` | 在 `.gitignore` 里，但**打包整个文件夹时会一起带走** |
-| C | **git 历史里的残留** | 只改文件清不掉历史，`git log -p` 照样翻得出来 |
-| D | 本机 `%APPDATA%` 的配置与日志（可选，`--purge-installed`） | 含密码密文；**只发项目文件夹的话不需要动它** |
-
-替换值都是明显假的（学号→`2025000000`、MAC→`001122334455`、票据→`ST-EXAMPLE-TICKET`）。
-
-历史里已经有真实信息时，加 `--reset-git` 把历史压成一次干净提交
-（原 `.git` 会自动备份到同级目录，不会丢）：
-
-```bash
-python tools/clean-for-sharing.py --apply --reset-git
-```
-
-> 跑完记得再跑一次不带 `--apply` 的检查确认干净了。
-
----
-
 ## 贡献
 
 欢迎 PR，尤其是**新的认证系统适配器**和**学校预设**：
@@ -353,8 +319,7 @@ python tools/clean-for-sharing.py --apply --reset-git
 3. 在 `campusnet/presets.py` 的 `PRESETS` 里加一条学校预设（可选）；
 4. 跑一遍 `python tools/verify_algorithms.py` 和 `python campus_login.py selftest`。
 
-**请勿在 PR 里提交任何真实账号、密码或内网地址。** 提交前先跑一遍
-`python tools/clean-for-sharing.py` 检查。
+**请勿在 PR 里提交任何真实账号、密码或内网地址。**
 
 ## License
 

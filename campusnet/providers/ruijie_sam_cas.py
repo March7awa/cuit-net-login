@@ -131,7 +131,8 @@ def _service_sort_key(item):
 class RuijieSamCasProvider(Provider):
     name = "ruijie_sam_cas"
     description = "锐捷 SAM/ePortal 5.x + CAS 单点登录（成都信息工程大学等）"
-    required_options = ("portal",)
+    # portal 不是必填 —— 没配的话程序会从门户重定向里自己探测
+    required_options = ()
     example_options = {
         "portal": "http://10.254.241.66",
         "mac": "auto",
@@ -147,7 +148,8 @@ class RuijieSamCasProvider(Provider):
         "service_login_path": "/eportal/network/serviceLogin",
     }
     notes = (
-        "portal 填认证页所在地址（浏览器地址栏里那个 IP，不要带 /portal 后缀）。\n"
+        "portal 可以不填 —— 断网时程序会从门户重定向里自己探测。\n"
+        "  想手填就填认证页那个 IP（不要带 /portal 后缀）。\n"
         "  mac 一般写 auto，程序会自动取默认路由网卡的 MAC；\n"
         "  如果门户绑定了别的网卡，就手工填 12 位十六进制，例如 001122334455。\n"
         "  nasip 是接入设备（AC/NAS）的地址，很重要：不带它门户会填占位值\n"
@@ -171,13 +173,63 @@ class RuijieSamCasProvider(Provider):
             return mac
         return primary_mac()
 
+    @staticmethod
+    def _normalize_portal(value: str) -> str:
+        value = value.strip().rstrip("/")
+        if value and not value.startswith(("http://", "https://")):
+            value = "http://" + value
+        return value
+
+    def _portal_from_captive(self) -> str:
+        """从 AC 的重定向里推出门户地址。"""
+        captive = self._captive_entry()
+        if not captive:
+            return ""
+        parts = urllib.parse.urlsplit(captive[0])
+        if parts.scheme and parts.netloc:
+            return f"{parts.scheme}://{parts.netloc}"
+        return ""
+
     def _portal(self) -> str:
-        portal = str(self.cfg.option("portal", "")).strip().rstrip("/")
-        if not portal:
-            raise RuntimeError("options.portal 未配置")
-        if not portal.startswith(("http://", "https://")):
-            portal = "http://" + portal
-        return portal
+        """门户地址。没配就自己探测 —— 用户不用知道这个地址。"""
+        configured = self._normalize_portal(str(self.cfg.option("portal", "") or ""))
+        if configured:
+            return configured
+        found = self._portal_from_captive()
+        if found:
+            self.log.info("配置里没写 portal，已从门户重定向里探测到: %s", found)
+            return found
+        raise RuntimeError(
+            "没有配置认证服务器，而且当前网络没有被门户劫持，探测不到。\n"
+            "      解法：断开校园网（或拔网线）后重试，程序会自动探测；\n"
+            "      或者手工填上认证页的地址（浏览器地址栏里那个 IP）。")
+
+    def discover(self) -> dict:
+        """探测门户地址和接入设备地址。
+
+        需要在**未认证**状态（被门户劫持）下才有结果，这也正是用户需要
+        配置的时候。返回 ``{"ok": bool, "portal": str, "nasip": str, ...}``。
+        """
+        captive = self._captive_entry()
+        if not captive:
+            return {"ok": False, "reason":
+                    "现在网络是通的（没被门户劫持），探测不到。\n"
+                    "断开校园网 / 拔掉网线后再点一次就行。"}
+        entry, probe = captive
+        parts = urllib.parse.urlsplit(entry)
+        portal = f"{parts.scheme}://{parts.netloc}" if parts.netloc else ""
+        result: dict = {"ok": True, "portal": portal, "nasip": "", "entry": entry,
+                        "from": probe}
+
+        # 跟着 AC 给的链走一遍，会话参数里带着真实的 nasIp
+        try:
+            params, _ = self._walk_to_session(portal, self._resolve_mac())
+            result["nasip"] = params.get("nasIp", "") or ""
+            if result["nasip"] in ("1.1.1.1",):
+                result["nasip"] = ""
+        except Exception as exc:  # noqa: BLE001
+            result["note"] = f"跟随重定向取 nasip 失败: {exc}"
+        return result
 
     def _remember_nasip(self, nas_ip: str) -> bool:
         """把学到的真实 nasIp 写回配置文件（失败不影响登录）。"""
@@ -214,8 +266,12 @@ class RuijieSamCasProvider(Provider):
                 continue
 
             # 1) 标准做法：AC 直接 302
-            if resp.location and _looks_like_portal(resp.location):
-                return urllib.parse.urljoin(probe_url, resp.location), probe_url
+            if resp.location:
+                # 有些 AC 给的是相对路径（Location: /portal?...），先补成绝对地址，
+                # 否则下面的私网判断会因为解析不出主机名而漏掉。
+                target = urllib.parse.urljoin(probe_url, resp.location)
+                if _looks_like_portal(target):
+                    return target, probe_url
 
             # 2) 有些 AC 不 302，而是回一个 200 + meta refresh / JS 跳转，
             #    把门户地址写在正文里。这种也要认出来。

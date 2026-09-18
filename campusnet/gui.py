@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import queue
@@ -191,7 +192,7 @@ def portal_origin(url: str) -> str:
 # 向导
 # ==========================================================================
 class Wizard(ttk.Frame):
-    STEPS = ("选择认证方式", "认证服务器", "账号密码", "测试登录", "完成")
+    STEPS = ("选择认证方式", "认证服务器（可跳过）", "账号密码", "测试登录", "完成")
 
     def __init__(self, master: tk.Misc, app: "App", start_page: int = 0) -> None:
         super().__init__(master, padding=(18, 14))
@@ -277,6 +278,8 @@ class Wizard(ttk.Frame):
     def show(self, index: int) -> None:
         self.index = max(0, min(index, len(self.pages) - 1))
         self._clear()
+        # 每页的提示语是各自算出来的，翻页时别把上一页的结论留在屏幕上
+        self.detect_note.set("")
         self.pages[self.index]()
         for i, lbl in enumerate(self.step_labels):
             if i == self.index:
@@ -342,16 +345,27 @@ class Wizard(ttk.Frame):
             f"已套用「{item['label']}」预设：服务器 {portal or '(待填)'}")
 
     def _page_server(self) -> None:
-        ttk.Label(self.body, text="认证服务器地址",
+        ttk.Label(self.body, text="认证服务器",
                   font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
-        ttk.Label(self.body, foreground="#666", wraplength=560, justify="left",
-                  text="就是断网时浏览器地址栏里跳出来的那个地址（只填到 IP，"
-                       "不要带后面的路径）。").pack(anchor="w", pady=(4, 12))
+        ttk.Label(self.body, text="这一页可以整页跳过，直接点「下一步」。",
+                  foreground="#0a7", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(self.body, foreground="#666", wraplength=580, justify="left",
+                  text="断开校园网时程序会自己去碰一下网络，从门户的跳转里把服务器地址"
+                       "和接入设备地址探测出来，不需要你知道这些。").pack(anchor="w", pady=(4, 10))
+
+        pick = ttk.Frame(self.body)
+        pick.pack(fill="x", pady=(0, 10))
+        ttk.Button(pick, text="自动检测（推荐先点这个）",
+                   command=self._detect_server).pack(side="left")
+        ttk.Label(pick, textvariable=self.detect_note, foreground="#0a7",
+                  font=UI_FONT_SMALL).pack(side="left", padx=10)
 
         row = ttk.Frame(self.body)
         row.pack(fill="x")
         ttk.Label(row, text="服务器", width=10).pack(side="left")
         ttk.Entry(row, textvariable=self.portal, width=46).pack(side="left", fill="x", expand=True)
+        ttk.Label(self.body, foreground="#888", font=UI_FONT_SMALL,
+                  text="　　　留空即可（自动探测）。手填就填认证页那个 IP。").pack(anchor="w", pady=(2, 0))
 
         # 只有需要选运营商的认证方式（目前是锐捷 SAM）才显示这一行
         try:
@@ -366,10 +380,10 @@ class Wizard(ttk.Frame):
                 side="left", fill="x", expand=True)
             ttk.Label(self.body, foreground="#888", font=UI_FONT_SMALL, wraplength=580,
                       justify="left",
-                      text="AC/NAS 地址（nasip）。不带它门户会填占位值 1.1.1.1，"
-                           "导致拿不到运营商列表、认证也不会真正放行。\n"
-                           "程序会尽量自动学到并记住；必要时可在浏览器 F12 控制台里搜 "
-                           "nasIp 手工填，例如 10.254.0.1。").pack(anchor="w", pady=(4, 0))
+                      text="　　　同样留空即可。这个是接入设备（AC）的地址，"
+                           "不填的话门户会当成 1.1.1.1，导致拿不到运营商列表、\n"
+                           "　　　认证也不会真正放行 —— 所以程序会自动探测、学到并记住它。").pack(
+                anchor="w", pady=(2, 0))
 
             row2 = ttk.Frame(self.body)
             row2.pack(fill="x", pady=(8, 0))
@@ -393,6 +407,53 @@ class Wizard(ttk.Frame):
         ttk.Label(self.body, foreground="#666", wraplength=560, justify="left",
                   text="如果你的学校不在默认列表里，可以先用上面选好的通用方式，"
                        "配好后再按 README 里的说明补参数。").pack(anchor="w")
+
+    def _detect_server(self) -> None:
+        """断开校园网时，从门户的跳转里把服务器地址和接入设备地址探测出来。
+
+        用户不需要知道这两个地址 —— 这正是它们该被自动填的原因。
+        """
+        self.detect_note.set("正在探测…")
+
+        def work() -> dict:
+            import json
+
+            data = json.loads(json.dumps(config_mod.DEFAULTS))
+            data["provider"] = self.provider_name.get()
+            data["username"] = self.username.get().strip() or "probe"
+            opts = data.setdefault("options", {})
+            opts["portal"] = self.portal.get().strip()
+            opts["nasip"] = self.nasip.get().strip()
+            opts["mac"] = "auto"
+            cfg = config_mod.Config(data, config_mod.resolve_path_for_probe())
+            log = build_logger(cfg, console=False)
+            log.addHandler(QueueLogHandler(self.app.log_queue))
+            provider = get_provider(cfg.provider)(cfg, HttpClient(timeout=8), log)
+            if not hasattr(provider, "discover"):
+                return {"ok": False, "reason": f"{cfg.provider} 这个认证方式不需要填这些，直接下一步就行。"}
+            return provider.discover()
+
+        def done(result, error) -> None:
+            if error:
+                self.detect_note.set(f"探测出错：{error}")
+                return
+            if not result.get("ok"):
+                self.detect_note.set("")
+                messagebox.showinfo("探测不到", result.get("reason", "未知原因"))
+                return
+            found = []
+            if result.get("portal"):
+                self.portal.set(result["portal"])
+                found.append(f"服务器 {result['portal']}")
+            if result.get("nasip"):
+                self.nasip.set(result["nasip"])
+                found.append(f"接入设备 {result['nasip']}")
+            self.detect_note.set("检测到：" + "，".join(found) if found
+                                 else "探测到门户但没取到地址")
+            if result.get("note"):
+                self.detect_note.set(self.detect_note.get() + f"（{result['note']}）")
+
+        self.bg.run(work, done)
 
     def _page_account(self) -> None:
         ttk.Label(self.body, text="输入你的校园网账号",
@@ -504,9 +565,6 @@ class Wizard(ttk.Frame):
     def next(self) -> None:
         if self.index == 0 and not self.provider_name.get():
             messagebox.showwarning("提示", "请先选择一种认证方式")
-            return
-        if self.index == 1 and not self.portal.get().strip():
-            messagebox.showwarning("提示", "请填写认证服务器地址")
             return
         if self.index == 2:
             if not self.username.get().strip():

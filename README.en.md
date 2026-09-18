@@ -139,11 +139,19 @@ See [`config.example.json`](config.example.json) for a complete example.
 |---|---|
 | `provider` | Which adapter to use |
 | `username` / `password` | Account; the password is written by `set-password` (stored as DPAPI ciphertext on Windows) |
-| `options.portal` | Authentication server address, usually the IP you see in the browser's address bar |
+| `options.portal` | Authentication server address. **May be left empty** — it is auto-discovered from the portal redirect while you are offline |
+| `options.nasip` | NAS/AC (access device) address. **May be left empty** — also auto-discovered, then written back to the config |
 | `options.mac` | `auto` takes the MAC of the default NIC; if it picks the wrong one, set 12 hex digits by hand |
 | `watch.interval` | Seconds between network probes (default 20) |
 | `watch.check_min_ok` | How many probe targets must respond to count as online (raise to 2 for a more conservative check on flaky networks) |
 | `logging.level` | `DEBUG` shows the details of every request |
+
+> **Don't know `portal` / `nasip`? Leave them empty.** They are internal campus
+> addresses that ordinary users have no reason to know. Run the program while you
+> are **not authenticated** (i.e. the portal is hijacking you) and it will probe
+> the network, read both addresses out of the campus equipment's redirect, and
+> remember `nasip` for next time. Wizard page 2 has an "auto-detect" button, and
+> skipping the whole page with "Next" works just as well.
 
 ---
 
@@ -197,7 +205,8 @@ campus-net-login/
 ├── scripts/                     # autostart (Windows scheduled task / systemd / launchd)
 ├── tools/
 │   ├── srun_reference.js        # JS reference implementation of the Srun algorithm (for cross-checking)
-│   └── verify_algorithms.py     # run every algorithm self-test in one go
+│   ├── verify_algorithms.py     # run every algorithm self-test in one go
+│   └── verify_discover.py       # local fake portal: proves portal/nasip auto-discovery works
 └── docs/
 ```
 
@@ -209,6 +218,17 @@ python tools/verify_algorithms.py
 
 It checks that AES matches the FIPS-197 standard vectors, that the CryptoJS-compatible mode can reproduce a
 **ciphertext captured from a real portal**, and that Srun's xEncode matches the portal's own JavaScript exactly.
+
+### Verify that you really don't need to fill in the server address
+
+```bash
+python tools/verify_discover.py
+```
+
+This spins up a **fake campus portal on localhost**, replays the real chain
+(hijacked by the AC → redirected to the portal → portal hands back a session and the real access-device
+address), and then asserts that with `portal` and `nasip` **both empty** the program does discover both
+addresses and never writes anything into your real config. No external network involved.
 
 ---
 
@@ -254,8 +274,10 @@ PRs are welcome, especially **new authentication adapters** and **campus presets
 1. Fork, then create `campusnet/providers/your_name.py`, subclass `Provider`,
    and follow the style of `ruijie_sam_cas.py`;
 2. Register it in `_BUILTINS` in `campusnet/providers/__init__.py`;
-3. Add a campus preset to `PRESETS` in `campus_login.py` (optional);
-4. Run `python tools/verify_algorithms.py` and `python campus_login.py selftest`.
+3. Add a campus preset to `PRESETS` in `campusnet/presets.py` (optional — and only if
+   the addresses really are needed, see the note above about leaving them empty);
+4. Run `python tools/verify_algorithms.py`, `python tools/verify_discover.py`
+   and `python campus_login.py selftest`.
 
 **Never include real account names, passwords or internal addresses in a PR.**
 

@@ -1,0 +1,24 @@
+# 统一换行符，避免在 Windows 上被 autocrlf 改成 CRLF 后污染 shell 脚本。
+* text=auto
+
+*.py      text eol=lf
+*.sh      text eol=lf
+*.js      text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+
+# Windows 计划任务脚本：CRLF 更稳妥（文件本身是 UTF-8 with BOM，
+# 因为 Windows PowerShell 5.1 会按 ANSI 解析无 BOM 的文件）。
+*.ps1     text eol=crlf
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 二进制
+*.png     binary
+*.jpg     binary
+*.ico     binary
+
+# 让 GitHub 的语言统计更准确
+campus_login.py linguist-language=Python

@@ -34,6 +34,9 @@ from campusnet.runner import SingleInstance, make_setup
 # 开箱即用的学校预设见 campusnet/presets.py（CLI 和 GUI 共用一份）
 # --------------------------------------------------------------------------
 
+#: 这两项是可自动探测的网络地址，不该让用户填，也不该拿某个学校的值当默认值
+AUTO_OPTIONS = ("portal", "nasip")
+
 
 def _print(msg: str = "") -> None:
     try:
@@ -156,7 +159,15 @@ def cmd_init(args) -> int:
             options[key.strip()] = value.strip()
     if not batch:
         _print("\n填写 options（直接回车用默认值）")
+        if any(k in AUTO_OPTIONS for k in provider_cls.example_options):
+            _print("  提示：portal / nasip 这两项可以留空 —— 断网时程序会自己从门户"
+                   "重定向里探测，不需要你知道这些地址。")
         for key, example in provider_cls.example_options.items():
+            if key in AUTO_OPTIONS:
+                # 不要把 CUIT 的地址当默认值塞给别人 —— 留空才是通用做法
+                current = options.get(key, "")
+                options[key] = _ask(f"  {key}（留空自动探测）", str(current))
+                continue
             current = options.get(key, example)
             if isinstance(example, dict):
                 _print(f"  {key} 当前: {json.dumps(current, ensure_ascii=False)}")

@@ -136,6 +136,17 @@ class Config:
         return bool(value)
 
 
+def resolve_path_for_probe() -> Path:
+    """给「探测」用的临时配置路径。
+
+    故意**不**返回真实配置路径：探测只是拿一个临时 Config 去试网络，
+    万一将来哪条代码路径顺手 save()，也不能把用户真配置覆盖掉。
+    """
+    import tempfile
+
+    return Path(tempfile.gettempdir()) / "campus-net-probe" / "config.json"
+
+
 def load(path: str | Path | None = None, *, must_exist: bool = True) -> Config:
     resolved = resolve_config_path(str(path) if path else None)
     if not resolved.exists():

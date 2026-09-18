@@ -18,7 +18,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
-NO_PRESET = "（不选，我自己填）"
+NO_PRESET = "（不确定／让程序自己检测）"
 
 
 def get_preset(key: str) -> dict[str, Any] | None:

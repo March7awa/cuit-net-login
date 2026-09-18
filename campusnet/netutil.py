@@ -19,6 +19,7 @@ import socket
 import subprocess
 import uuid
 from typing import Iterable, Iterator
+from urllib.parse import urljoin
 
 __all__ = [
     "default_local_ip",
@@ -361,8 +362,10 @@ def is_online(client, *, checks: Iterable = CHECK_URLS, min_ok: int = 1) -> bool
             if ok >= min_ok:
                 return True
             continue
-        if resp.location and _looks_like_portal(resp.location):
-            return False
+        if resp.location:
+            # 相对 Location（"/portal?...") 也要能认出来，先补成绝对地址
+            if _looks_like_portal(urljoin(url, resp.location)):
+                return False
         if resp.status in (301, 302, 303, 307, 308):
             return False
     return False
@@ -382,7 +385,8 @@ def detect_captive_redirect(client, *, checks: Iterable = CHECK_URLS):
         if _matches(resp, expected):
             continue
         if resp.location:
-            return url, resp.location
+            # 交给调用方前先补成绝对地址，相对 Location 也能直接用
+            return url, urljoin(url, resp.location)
         if resp.status in (301, 302, 303, 307, 308):
             return url, resp.location
         # Interception without a redirect (HTTP 200 carrying a login page).

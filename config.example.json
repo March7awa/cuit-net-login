@@ -3,7 +3,8 @@
   "username": "你的学号或账号",
   "password": "",
   "options": {
-    "portal": "http://10.254.241.66",
+    "portal": "",
+    "nasip": "",
     "mac": "auto",
     "entry_path": "/entry",
     "workflow_path": "/eportal/workFlow/getCurrentNode",

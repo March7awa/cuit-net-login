@@ -126,11 +126,22 @@ INFO    步骤4 提交结果: HTTP 401
 
 这套锐捷 SAM 5.x 在很多学校都在用，差异一般只在：
 
-- `options.portal`：认证服务器 IP
 - `options.mac`：一般 `auto` 就行
 - `entry_path` / `cas_prefix`：如果页面结构不同再改
 
-默认值就是按成都信息工程大学配的。
+**`options.portal` 和 `options.nasip` 通常不用填。** 程序在没认证（被门户劫持）
+的状态下会先碰一个外网地址，从 AC 的 302 里拿到真正的入口：
+
+```
+GET http://connect.rom.miui.com/generate_204
+ -> 302 Location: http://<portal>/portal/entry/pc/authenticate?...
+```
+
+门户地址就是那个 `Location` 的 origin，接入设备地址藏在随后跳转的
+`sessionId=...&nasIp=...` 里。这两个值都探测不到时才需要手填。
+
+`tools/verify_discover.py` 会在本机起一个假门户，把这条探测链路完整跑一遍
+（包括「`portal` / `nasip` 全空也能探测出来」这个断言），不碰外网。
 
 ---
 

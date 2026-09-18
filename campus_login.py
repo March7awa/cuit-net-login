@@ -442,6 +442,46 @@ def cmd_selftest(args) -> int:
     check("save() 写出的文件不带 BOM",
           tmp.read_bytes()[:3] == b"\xef\xbb\xbf", False)
 
+    _print("\n密码在「别人的电脑 / 全新账号」上能不能写进去")
+    import os as _os
+
+    from campusnet import secret as _secret
+
+    fresh = _Path(tempfile.mkdtemp()) / "brand-new-machine"
+    saved_appdata = _os.environ.get("APPDATA")
+    saved_explicit = _os.environ.pop("CAMPUS_LOGIN_CONFIG", None)
+    try:
+        # 模拟别人第一次运行：配置目录还不存在
+        _os.environ["APPDATA"] = str(fresh)
+        newcfg = config_mod.load(must_exist=False)
+        check("全新的 %APPDATA% 下目录会自动建出来",
+              newcfg.path.parent.exists(), False)
+        newcfg.set_password("别人的密码Abc123")
+        newcfg.save()
+        check("密码写得进去", newcfg.path.exists(), True)
+        check("密码读得回来", config_mod.load().password(), "别人的密码Abc123")
+
+        # DPAPI 用不了的机器上必须降级成明文，而不是干脆写不进去
+        was_windows = _secret._IS_WINDOWS
+        _secret._IS_WINDOWS = False
+        try:
+            fallback = config_mod.load()
+            fallback.set_password("降级分支")
+            fallback.save()
+            check("DPAPI 不可用时降级存储且仍可读",
+                  config_mod.load().password(), "降级分支")
+        finally:
+            _secret._IS_WINDOWS = was_windows
+    finally:
+        if saved_appdata is None:
+            _os.environ.pop("APPDATA", None)
+        else:
+            _os.environ["APPDATA"] = saved_appdata
+        if saved_explicit is not None:
+            _os.environ["CAMPUS_LOGIN_CONFIG"] = saved_explicit
+        import shutil as _shutil
+        _shutil.rmtree(fresh, ignore_errors=True)
+
     _print()
     _print("全部通过 ✅" if not failures else f"{failures} 项失败 ❌")
     return 0 if not failures else 1

@@ -1,0 +1,26 @@
+{
+  "provider": "ruijie_sam_cas",
+  "username": "你的学号或账号",
+  "password": "",
+  "options": {
+    "portal": "http://10.254.241.66",
+    "mac": "auto",
+    "entry_path": "/entry",
+    "workflow_path": "/eportal/workFlow/getCurrentNode",
+    "cas_prefix": "/cas-sso",
+    "app_type": "normal",
+    "language": "zh-CN"
+  },
+  "watch": {
+    "interval": 20,
+    "retry_interval": 5,
+    "cooldown_after_login": 10,
+    "check_min_ok": 1
+  },
+  "logging": {
+    "level": "INFO",
+    "file": true,
+    "max_bytes": 1048576,
+    "backups": 3
+  }
+}

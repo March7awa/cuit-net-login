@@ -22,6 +22,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# 中文 Windows 的控制台默认是 GBK，打印 ✅ 会直接抛 UnicodeEncodeError。
+# 别人 clone 下来照着 README 跑一下就撞上，所以先把输出切成 UTF-8。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+except Exception:
+    pass
+
 from campusnet import config as config_mod           # noqa: E402
 from campusnet import netutil                          # noqa: E402
 from campusnet.httpx import HttpClient                 # noqa: E402

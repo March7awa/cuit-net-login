@@ -29,6 +29,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# 中文 Windows 的控制台默认是 GBK，打印 ✅ 会直接抛 UnicodeEncodeError。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+except Exception:
+    pass
+
 from campusnet.aes import _encrypt_block, _expand_key, encrypt_cryptojs_style  # noqa: E402
 from campusnet.providers.srun import srun_b64, xencode  # noqa: E402
 

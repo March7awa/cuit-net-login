@@ -27,6 +27,7 @@ __all__ = [
     "normalize_mac",
     "list_interfaces",
     "is_online",
+    "link_up",
     "detect_captive_redirect",
     "CHECK_URLS",
 ]
@@ -44,7 +45,7 @@ CHECK_URLS: tuple[tuple[str, object], ...] = (
     ("http://connectivitycheck.gstatic.com/generate_204", 204),
 )
 
-PROBE_TIMEOUT = 5.0
+PROBE_TIMEOUT = 3.0
 
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -94,6 +95,30 @@ def default_local_ip() -> str | None:
             continue
         finally:
             s.close()
+    return None
+
+
+def link_up() -> bool | None:
+    """网卡链路是不是通的 —— 纯本地查询，毫秒级，一个包都不发。
+
+    为什么要这个：拔了网线的时候，每个探测点都要等满 ``PROBE_TIMEOUT``，
+    一轮下来 20 秒。看门狗正好卡在这一轮里的时候用户把网线插回去，他就得
+    再等十几秒 —— 感觉就是「它不自己连，非得等我打开浏览器、校园网登录
+    窗口弹出来」。链路状态是本地问的，拔插瞬间就能看出来。
+
+    返回 ``True`` / ``False`` / ``None``（问不出来，调用方退回网络探测）。
+    """
+    ip = default_local_ip()
+    if not ip:
+        return False
+    if os.name != "nt":
+        # 其它平台没有可靠的 OperStatus，别乱猜
+        return None
+    for iface in list_interfaces():
+        if ip in iface.get("ipv4", ()):
+            # 拔掉网线后 Windows 可能还留着 IP 一小会儿，
+            # 所以「有 IP」不等于「链路通」，要再看网卡的 OperStatus。
+            return iface.get("oper_status") == 1
     return None
 
 

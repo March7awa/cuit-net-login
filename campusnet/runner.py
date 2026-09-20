@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import config as config_mod
 from .httpx import HttpClient, HttpError, sanitize_url
-from .netutil import CHECK_URLS, detect_captive_redirect, is_online
+from .netutil import CHECK_URLS, detect_captive_redirect, is_online, link_up
 from .providers import LoginResult, get_provider
 
 __all__ = ["Setup", "build_logger", "SingleInstance", "Runner"]
@@ -67,34 +67,83 @@ def build_logger(cfg, *, verbose: bool = False, console: bool = True) -> logging
 # --------------------------------------------------------------------------
 # single instance
 # --------------------------------------------------------------------------
+#: Windows 上锁的字节数 —— 必须覆盖锁文件里可能出现的任何偏移量
+_LOCK_BYTES = 1024
+
+
 class SingleInstance:
-    """Cross-platform advisory lock so two watchdogs never fight each other."""
+    """Cross-platform advisory lock so two watchdogs never fight each other.
+
+    另外单独写一个 ``watch.heartbeat`` 文件当心跳 —— 不能写进锁文件本身：
+    Windows 的字节锁连**读**都会挡住别的进程，``--once`` 根本读不到内容。
+    心跳是给 ``watch --once`` 判断「常驻看门狗是活着还是卡死了」用的：
+    活着就别插手（两个进程同时重登会各自新建会话，把 AC 正在下发的授权
+    打断），卡死了才接管。
+    """
+
+    HEARTBEAT_STALE_SECONDS = 180
 
     def __init__(self, name: str = "watch.lock") -> None:
         self.path = config_mod.user_config_dir() / name
+        self.heartbeat_path = self.path.with_name(self.path.name + ".heartbeat")
         self._fh = None
 
     def acquire(self) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self.path, "a+")
         try:
+            # 一定要先 seek(0)，而且锁一整个区间而不是 1 个字节：
+            # msvcrt 锁的是「当前文件位置起 N 个字节」，追加模式下位置在
+            # 文件末尾，两个进程会各自锁到不同的字节上，于是双双「加锁成功」。
+            # 锁 0..1023 能覆盖任何写进锁文件的字节偏移，跟老版本也重叠。
+            self._fh.seek(0)
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(self._fh.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_NBLCK, _LOCK_BYTES)
             else:
                 import fcntl
 
                 fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self._fh.seek(0)
-            self._fh.truncate()
-            self._fh.write(str(os.getpid()))
-            self._fh.flush()
+            self._write_heartbeat()
             return True
         except OSError:
             self._fh.close()
             self._fh = None
             return False
+
+    def _write_heartbeat(self) -> None:
+        """心跳写到独立文件（锁文件本身读不了）。失败无所谓。"""
+        try:
+            self.heartbeat_path.write_text(
+                f"{os.getpid()} {int(time.time())}", encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def touch(self) -> None:
+        """告诉别人「我还活着」。看门狗每轮调一次。"""
+        if self._fh:
+            self._write_heartbeat()
+
+    def heartbeat(self) -> tuple[int | None, float | None]:
+        """``(pid, 心跳距今秒数)``；读不出来就是 ``(None, None)``。"""
+        try:
+            parts = self.heartbeat_path.read_text(
+                encoding="utf-8", errors="replace").split()
+            return int(parts[0]), max(0.0, time.time() - int(parts[1]))
+        except Exception:  # noqa: BLE001
+            return None, None
+
+    def is_stale(self) -> bool:
+        """持锁的那个进程是不是已经卡死了。
+
+        心跳文件**读不到**时返回 False（当成对方还活着）：宁可不插手 ——
+        两个进程同时重登会各自新建会话，把 AC 正在下发的授权打断。
+        只有明明有心跳、但它已经过期很久，才认定对方卡死并接管。
+        """
+        pid, age = self.heartbeat()
+        return (pid is not None and age is not None
+                and age > self.HEARTBEAT_STALE_SECONDS)
 
     def release(self) -> None:
         if not self._fh:
@@ -104,7 +153,7 @@ class SingleInstance:
                 import msvcrt
 
                 self._fh.seek(0)
-                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, _LOCK_BYTES)
             else:
                 import fcntl
 
@@ -114,6 +163,10 @@ class SingleInstance:
         finally:
             self._fh.close()
             self._fh = None
+            try:
+                self.heartbeat_path.unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001
+                pass
 
     def __enter__(self) -> "SingleInstance":
         if not self.acquire():
@@ -254,7 +307,8 @@ class Runner:
         self.log.info("本机还没拿到 IP，等网络就绪…")
         return False
 
-    def watch(self, *, max_cycles: int | None = None) -> int:
+    def watch(self, *, max_cycles: int | None = None,
+              lock: "SingleInstance | None" = None) -> int:
         watch = self.cfg.section("watch")
         interval = max(5, int(watch.get("interval", 20)))
         cooldown = max(0, int(watch.get("cooldown_after_login", 10)))
@@ -265,9 +319,23 @@ class Runner:
         self.log.info("看门狗启动: 每 %ss 检查一次网络（Ctrl+C 退出）", interval)
         failures = 0
         cycle = 0
+        link_down_skips = 0
         try:
             while max_cycles is None or cycle < max_cycles:
                 cycle += 1
+                if lock is not None:
+                    lock.touch()  # 心跳：让 --once 知道我还活着
+                # 先问本地链路状态。拔了网线时它毫秒级就返回 False，
+                # 不用让 4 个探测点各自等满超时（原来一轮要 20 秒白等）。
+                # 也不能全信它 —— 虚拟网卡偶尔会报错状态，所以攒够 15 次
+                # 就强制真探测一轮兜底，保证不会永远卡在这儿。
+                if link_up() is False and link_down_skips < 15:
+                    link_down_skips += 1
+                    self.log.debug("网卡链路是断的（没插网线 / 网卡被禁用），等它恢复")
+                    self._sleep(net_retry, wake_on_link=True)
+                    continue
+                link_down_skips = 0
+
                 if self.is_online():
                     if failures:
                         self.log.info("网络已恢复")
@@ -277,7 +345,7 @@ class Runner:
 
                 # 开机瞬间网卡还没起来，这时去登录既没意义、又把退避时间拉长
                 if not self._network_ready():
-                    self._sleep(net_retry)
+                    self._sleep(net_retry, wake_on_link=True)
                     continue
 
                 failures += 1
@@ -307,7 +375,7 @@ class Runner:
                     failures = max(0, failures - 1)
                     self.log.info("认证服务器暂时连不上（%s），%d 秒后重试",
                                   result.message, net_retry)
-                    self._sleep(net_retry)
+                    self._sleep(net_retry, wake_on_link=True)
                 else:
                     backoff = min(300, interval * (2 ** min(failures, 5)))
                     self.log.error("登录失败: %s（%ds 后重试）", result.message, backoff)
@@ -316,7 +384,15 @@ class Runner:
             self.log.info("收到退出信号，看门狗停止")
         return 0
 
-    def _sleep(self, seconds: float) -> None:
+    def _sleep(self, seconds: float, *, wake_on_link: bool = False) -> None:
+        """睡 seconds 秒；``wake_on_link`` 时链路一恢复就立刻醒。
+
+        断网等待期间用这个：插回网线到重新认证之间不该有几十秒的空白 ——
+        实测用户就是在这段空白里自己开浏览器，然后以为是「校园网登录窗口
+        弹出来它才连上」。
+        """
         end = time.time() + seconds
         while time.time() < end:
-            time.sleep(min(1.0, end - time.time()))
+            time.sleep(min(1.0, max(0.0, end - time.time())))
+            if wake_on_link and link_up() is True:
+                return

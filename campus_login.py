@@ -248,6 +248,24 @@ def cmd_watch(args) -> int:
     from campusnet.runner import Runner
 
     if args.once:
+        # 常驻看门狗还活着的话，这里就别插手：两个进程同时重登会各自新建
+        # 会话，把 AC 正在下发的授权打断（实测踩过这个坑）。--once 只是
+        # 常驻进程挂掉之后的兜底，所以先看锁 + 心跳再决定。
+        lock = SingleInstance()
+        if not lock.acquire():
+            pid, age = lock.heartbeat()
+            if not lock.is_stale():
+                setup.log.info(
+                    "--once: 常驻看门狗还在（pid=%s，心跳 %s），跳过这次，不跟它抢着重登",
+                    pid, "读不到" if age is None else f"{int(age)} 秒前")
+                _print("常驻看门狗在跑，跳过")
+                return 0
+            setup.log.warning(
+                "--once: 看门狗（pid=%s）心跳已经 %d 秒没动，当成卡死，接管这次重连",
+                pid, int(age))
+        else:
+            lock.release()  # 探明了没人占，放开手去做登录
+
         runner = Runner(setup)
         if runner.is_online():
             setup.log.info("--once: 网络正常，无需登录")
@@ -260,8 +278,8 @@ def cmd_watch(args) -> int:
         return 0 if result.ok else 3
 
     try:
-        with SingleInstance():
-            return Runner(setup).watch()
+        with SingleInstance() as lock:
+            return Runner(setup).watch(lock=lock)
     except RuntimeError as exc:
         _print(str(exc))
         return 4

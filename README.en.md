@@ -206,7 +206,8 @@ campus-net-login/
 ├── tools/
 │   ├── srun_reference.js        # JS reference implementation of the Srun algorithm (for cross-checking)
 │   ├── verify_algorithms.py     # run every algorithm self-test in one go
-│   └── verify_discover.py       # local fake portal: proves portal/nasip auto-discovery works
+│   ├── verify_discover.py       # local fake portal: proves portal/nasip auto-discovery works
+│   └── verify_reconnect.py      # unplug/replug simulation: proves reconnect takes seconds
 └── docs/
 ```
 
@@ -256,6 +257,18 @@ set it manually in the config:
 **Q: `login` reports success, but I still have no internet.**
 Some campuses require you to pick an ISP / service after logging in, or show a compliance popup. Log in by hand once to see whether there are extra steps,
 then run `python campus_login.py doctor` and attach the output to an issue.
+
+**Q: How long after unplugging and replugging the cable does it reconnect?**
+A few seconds. The watchdog wakes every 20 s, but the **link state is checked locally**
+(reading the NIC's OperStatus — not a single packet), so it re-authenticates the moment the
+link returns instead of waiting out the current cycle. It used to probe every endpoint with a
+full timeout while the cable was out — a 20 s dead window in which people would open a browser
+and conclude that "it only connects when the campus login page pops up".
+
+**Q: Can the resident watchdog and the 5-minute fallback task log in at the same time?**
+No. `watch` uses a file lock plus a heartbeat, so only one of them ever re-authenticates; the
+fallback skips while the resident process is alive and only takes over once its heartbeat has
+been stale for 3 minutes.
 
 **Q: The network is not up yet at boot — will it fail?**
 No. The watchdog probes in a loop and logs in as soon as the link comes up. The scheduled task is also configured to restart on failure.

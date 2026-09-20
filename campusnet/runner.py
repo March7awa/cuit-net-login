@@ -19,6 +19,9 @@ __all__ = ["Setup", "build_logger", "SingleInstance", "Runner"]
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+#: 在线时每隔这么久往日志里写一条心跳，证明看门狗还活着、还在查
+ONLINE_LOG_SECONDS = 300.0
+
 
 # --------------------------------------------------------------------------
 # logging
@@ -320,6 +323,8 @@ class Runner:
         failures = 0
         cycle = 0
         link_down_skips = 0
+        online_since: float | None = None
+        last_online_log = 0.0
         try:
             while max_cycles is None or cycle < max_cycles:
                 cycle += 1
@@ -340,8 +345,20 @@ class Runner:
                     if failures:
                         self.log.info("网络已恢复")
                     failures = 0
+                    if online_since is None:
+                        online_since = time.time()
+                    # 在线的时候原来一行日志都不打，于是「它还在不在盯着」完全
+                    # 看不出来 —— 用户说「断网了它没反应」时，也没法判断程序当时
+                    # 以为自己是在线还是离线。每 5 分钟留一条心跳。
+                    if time.time() - last_online_log >= ONLINE_LOG_SECONDS:
+                        last_online_log = time.time()
+                        self.log.info("在线（已持续 %d 分钟），仍在每 %d 秒检查一次",
+                                      max(1, int((time.time() - online_since) // 60)),
+                                      interval)
                     self._sleep(interval)
                     continue
+                online_since = None
+                last_online_log = 0.0
 
                 # 开机瞬间网卡还没起来，这时去登录既没意义、又把退避时间拉长
                 if not self._network_ready():

@@ -97,14 +97,23 @@
 
 ### 命令行方式（Linux / macOS / 喜欢终端的人）
 
+**不用 git 也行**：在 GitHub 页面点绿色的 `Code` → `Download ZIP`，解压后直接跳到
+下面的 `python campus_login.py init`。
+
 ```bash
-git clone https://github.com/<you>/campus-net-login.git
-cd campus-net-login
+git clone https://github.com/March7awa/cuit-net-login.git
+cd cuit-net-login
 
 python campus_login.py init        # 交互式配置：选认证方式、填账号密码
 python campus_login.py login       # 立刻试一次
 python campus_login.py watch       # 前台常驻，看看日志对不对
 ```
+
+> 国内直连 github.com 时通时不通。clone 不动就换成镜像地址：
+> ```
+> git clone https://gh-proxy.com/https://github.com/March7awa/cuit-net-login.git
+> ```
+> 或者干脆用上面的 Download ZIP。
 
 跑通之后，装成开机自启：
 

@@ -31,14 +31,24 @@ This program stays resident in the background and probes the network every few s
 
 Requires **Python 3.8+** (on Windows, remember to tick *Add Python to PATH* during installation).
 
+**No git required**: click the green `Code` button on the GitHub page → `Download ZIP`,
+unzip it and skip straight to `python campus_login.py init` below.
+
 ```bash
-git clone https://github.com/<you>/campus-net-login.git
-cd campus-net-login
+git clone https://github.com/March7awa/cuit-net-login.git
+cd cuit-net-login
 
 python campus_login.py init        # interactive setup: pick an auth method, enter credentials
 python campus_login.py login       # try one login right now
 python campus_login.py watch       # run in the foreground and check the log looks right
 ```
+
+> github.com is reachable only intermittently from mainland China. If the clone hangs,
+> use the mirror instead:
+> ```
+> git clone https://gh-proxy.com/https://github.com/March7awa/cuit-net-login.git
+> ```
+> or just use `Download ZIP` as described above.
 
 Once that works, install it to start at login:
 
@@ -231,6 +241,25 @@ This spins up a **fake campus portal on localhost**, replays the real chain
 (hijacked by the AC → redirected to the portal → portal hands back a session and the real access-device
 address), and then asserts that with `portal` and `nasip` **both empty** the program does discover both
 addresses and never writes anything into your real config. No external network involved.
+
+### Verify that unplugging the cable reconnects in seconds
+
+```bash
+python tools/verify_reconnect.py
+```
+
+Link state and network probes are stubbed out, so it measures the real
+"link came back → login started" delay (about half a second) without touching a NIC.
+
+### Verify that a machine with a broken config ACL recovers
+
+```bash
+python tools/verify_broken_permissions.py
+```
+
+It really does break the config directory's permissions with `icacls` and then asserts that the
+program repairs them in place, falls back to another location when it cannot, and still finds the
+config with the old hard-coded path after moving.
 
 ---
 

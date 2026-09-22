@@ -598,8 +598,21 @@ class Wizard(ttk.Frame):
             cfg.raw["options"] = options
             cfg.raw["username"] = self.username.get().strip()
             cfg.set_password(self.password.get())
+            if getattr(cfg, "load_error", None) is not None:
+                # 原来那份读不了（一般是老版本改坏权限留下的），别往上写，
+                # 让 save() 换地方存 —— 但也得让用户知道存哪了。
+                _trace(f"配置读不了: {cfg.load_error!r}，保存时会换位置")
             cfg.save()
             self.app.cfg_path = cfg.path
+            if cfg.moved_from is not None:
+                messagebox.showinfo(
+                    "换了个地方保存",
+                    f"原来的配置文件锁住了（读不了也改不了）：\n{cfg.moved_from}\n\n"
+                    f"配置已经改存到：\n{cfg.path}\n\n"
+                    "程序照常能用。想搬回原位的话，用管理员身份运行一次：\n"
+                    f'icacls "{cfg.moved_from.parent}" /grant "%USERNAME%":(OI)(CI)F /T\n'
+                    "然后删掉新的那个文件重新配置一次。",
+                )
             return True
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("保存失败", str(exc))

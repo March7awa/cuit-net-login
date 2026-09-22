@@ -467,10 +467,14 @@ def cmd_selftest(args) -> int:
 
     fresh = _Path(tempfile.mkdtemp()) / "brand-new-machine"
     saved_appdata = _os.environ.get("APPDATA")
+    saved_local = _os.environ.get("LOCALAPPDATA")
     saved_explicit = _os.environ.pop("CAMPUS_LOGIN_CONFIG", None)
     try:
-        # 模拟别人第一次运行：配置目录还不存在
-        _os.environ["APPDATA"] = str(fresh)
+        # 模拟别人第一次运行：配置目录还不存在。
+        # LOCALAPPDATA 一起隔离 —— 否则备用位置会指到本机真实的那个目录，
+        # 测试就变成在看这台机器上有没有残留文件了。
+        _os.environ["APPDATA"] = str(fresh / "Roaming")
+        _os.environ["LOCALAPPDATA"] = str(fresh / "Local")
         newcfg = config_mod.load(must_exist=False)
         check("全新的 %APPDATA% 下目录会自动建出来",
               newcfg.path.parent.exists(), False)
@@ -495,6 +499,10 @@ def cmd_selftest(args) -> int:
             _os.environ.pop("APPDATA", None)
         else:
             _os.environ["APPDATA"] = saved_appdata
+        if saved_local is None:
+            _os.environ.pop("LOCALAPPDATA", None)
+        else:
+            _os.environ["LOCALAPPDATA"] = saved_local
         if saved_explicit is not None:
             _os.environ["CAMPUS_LOGIN_CONFIG"] = saved_explicit
         import shutil as _shutil

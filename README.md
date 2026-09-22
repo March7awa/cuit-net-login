@@ -283,7 +283,8 @@ campus-net-login/
 │   ├── srun_reference.js        # 深澜算法的 JS 参照实现（对拍用）
 │   ├── verify_algorithms.py     # 一键跑全部算法自检
 │   ├── verify_discover.py       # 本地假门户，验证「服务器/接入设备」能自动探测
-│   └── verify_reconnect.py      # 拔网线再插回去，验证几秒内自动重连
+│   ├── verify_reconnect.py      # 拔网线再插回去，验证几秒内自动重连
+│   └── verify_broken_permissions.py  # 把配置目录的权限搞坏，验证程序能自救
 └── docs/
 ```
 
@@ -339,6 +340,27 @@ python tools/verify_discover.py
 ---
 
 ## 常见问题
+
+**Q：别人电脑上提示 `[Errno 13] Permission denied: ...\campus-net-login\config.json`？**
+这是**早期版本**留下的坑：那时候保存完配置会跑一句
+`icacls /inheritance:r /grant:r "%USERNAME%":F`，想把权限收紧。但在域账号、
+微软账号、中文用户名上，`%USERNAME%` 解析出来的主体未必就是正在运行的那个账号 ——
+继承来的权限先被删掉、新的授权又落到别人头上，**属主就被自己的配置文件锁在门外了**。
+
+现在的版本：
+
+- 不再用 `/inheritance:r`，只**追加**当前用户 + SYSTEM + 管理员的授权，不可能自锁；
+- 读配置失败时会**先试着把权限修回来**（属主天然有权改自己的 DACL），
+  修好就继续用原来那份，配置一点不丢；
+- 实在修不动就换到 `%LOCALAPPDATA%\campus-net-login\config.json` 继续存，
+  下次启动也会自己去那儿找 —— 不会再卡在「用不了」。
+
+已经在旧版本上锁死了、又不想重装的话，在**命令提示符**里跑一行就好
+（路径换成报错里的那个目录）：
+
+```
+icacls "%APPDATA%\campus-net-login" /grant "%USERNAME%":(OI)(CI)F /T
+```
 
 **Q：密码改了 / 打错了，怎么重新设置？**
 图形界面主面板点 `修改密码`，输两遍就完事，**不用重跑向导**。

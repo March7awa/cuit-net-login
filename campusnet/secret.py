@@ -16,7 +16,8 @@ import stat
 import subprocess
 from typing import Any
 
-__all__ = ["protect", "unprotect", "is_encrypted"]
+__all__ = ["protect", "unprotect", "is_encrypted", "harden_permissions",
+           "repair_permissions"]
 
 _IS_WINDOWS = os.name == "nt"
 
@@ -76,6 +77,39 @@ def is_encrypted(blob: Any) -> bool:
     return isinstance(blob, dict) and blob.get("cipher") == "dpapi"
 
 
+def repair_permissions(path: str) -> bool:
+    """把当前用户对被锁住的文件 / 目录的权限加回去。
+
+    老版本用过 ``icacls /inheritance:r /grant:r "%USERNAME%":F``。在域账号、
+    微软账号或中文用户名上，``%USERNAME%`` 解析出来的主体未必就是正在运行的
+    那个账号 —— 继承来的权限先被删掉、grant 又落到别人头上，**属主就被自己
+    的文件锁在门外**，之后每次启动读配置都是 ``[Errno 13] Permission denied``。
+
+    这里做的正好相反：保留继承，只把当前用户加回去。对象属主天然有改 DACL
+    的权限，所以哪怕已经被锁死也救得回来。
+
+    返回是否成功。试完还是不行就返回 False，调用方换个地方写。
+    """
+    target = os.path.normpath(path)
+    if not _IS_WINDOWS:
+        try:
+            os.chmod(target, 0o700 if os.path.isdir(target) else 0o600)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    user = _current_user()
+    ok = False
+    # 目录要先修：能不能改文件上的权限，取决于能不能走到它
+    parent = os.path.dirname(target)
+    for candidate, spec in ((parent, "(OI)(CI)F"), (target, "F")):
+        if not candidate or not os.path.exists(candidate):
+            continue
+        if _run_hidden(f'icacls "{candidate}" /grant "{user}":{spec}'):
+            ok = True
+    return ok
+
+
 def harden_permissions(path: str) -> None:
     """Best-effort tightening of a secret-bearing file.
 
@@ -100,19 +134,20 @@ def harden_permissions(path: str) -> None:
         pass
 
 
-def _run_hidden(command: str) -> None:
-    """跑一条 cmd 命令，且**不弹黑窗口**。
+def _run_hidden(command: str) -> bool:
+    """跑一条 cmd 命令，且**不弹黑窗口**。返回是否成功（退出码 0）。
 
     不能用 ``os.system``：pythonw 没有控制台，Windows 会为子进程新建一个，
     于是每次保存配置都会闪一下黑框 —— 开机自启的程序闪黑框很吓人。
     """
     flags = 0x08000000 if _IS_WINDOWS else 0  # CREATE_NO_WINDOW
     try:
-        subprocess.run(command, shell=True, stdin=subprocess.DEVNULL,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       timeout=15, creationflags=flags)
+        proc = subprocess.run(command, shell=True, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=15, creationflags=flags)
+        return proc.returncode == 0
     except Exception:
-        pass
+        return False
 
 
 def _current_user() -> str:

@@ -207,7 +207,8 @@ campus-net-login/
 │   ├── srun_reference.js        # JS reference implementation of the Srun algorithm (for cross-checking)
 │   ├── verify_algorithms.py     # run every algorithm self-test in one go
 │   ├── verify_discover.py       # local fake portal: proves portal/nasip auto-discovery works
-│   └── verify_reconnect.py      # unplug/replug simulation: proves reconnect takes seconds
+│   ├── verify_reconnect.py      # unplug/replug simulation: proves reconnect takes seconds
+│   └── verify_broken_permissions.py  # break the config ACL, prove the program recovers
 └── docs/
 ```
 
@@ -234,6 +235,29 @@ addresses and never writes anything into your real config. No external network i
 ---
 
 ## FAQ
+
+**Q: Another machine says `[Errno 13] Permission denied: ...\campus-net-login\config.json`.**
+That is a trap left by an early build: after saving it ran
+`icacls /inheritance:r /grant:r "%USERNAME%":F` to tighten permissions. On domain accounts,
+Microsoft accounts or non-ASCII usernames, `%USERNAME%` does not always resolve to the account
+that is actually running — the inherited ACEs are removed first, the new grant lands on somebody
+else, and **the owner ends up locked out of their own config**.
+
+Current builds:
+
+- never use `/inheritance:r`; they only *add* grants for the current user + SYSTEM + Administrators,
+  so self-lockout is impossible;
+- if reading the config fails they **repair the ACL first** (the owner always has WRITE_DAC), so the
+  original file and its settings survive;
+- if the repair is impossible they move to `%LOCALAPPDATA%\campus-net-login\config.json` and will
+  find it again on the next start — it never just gives up.
+
+If a machine is already locked by an old build and you would rather not reinstall, one line in a
+Command Prompt fixes it (replace the path with the one from the error):
+
+```
+icacls "%APPDATA%\campus-net-login" /grant "%USERNAME%":(OI)(CI)F /T
+```
 
 **Q: I changed my password / typed it wrong. How do I set it again?**
 Click **Change password** on the main panel and type it twice — no need to redo the wizard.
